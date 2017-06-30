@@ -11,8 +11,6 @@
 #include <errno.h>
 #include <time.h>
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_timer.h>
-#include <SDL2/SDL_image.h>
 
 // Windoow
 #define WINW 640
@@ -239,7 +237,7 @@ static Block *mkblock(int x, int y, int w, int h, int o) {
 
 	block->active = 1;
 
-	if(!o) block->opacity = rand() % BLMXOPA;
+	if(!o) block->opacity = random() % BLMXOPA;
 	else block->opacity = o;
 
 	return block;
@@ -260,7 +258,7 @@ static void freeobj(Object *obj) {
 
 static Block **mkblockline(int ypos, int num, int spacing) {
 
-	Block **barr = calloc(num, sizeof(Block));
+	Block **barr = calloc(num, sizeof(Block*));
 	unsigned int a = 0;
 
 	int xpos = 0;
@@ -275,10 +273,10 @@ static Block **mkblockline(int ypos, int num, int spacing) {
 
 static Block ***mkblockstack(int ypos, int xpos, int num, int lines, int spacing) {
 
-	Block ***bstack = calloc(num * lines, sizeof(Block));
+	Block ***bstack = calloc(lines, sizeof(Block**));
 	unsigned int a = 0;
 
-	for(a = 0; a < num; a++) {
+	for(a = 0; a < lines; a++) {
 		bstack[a] = mkblockline(ypos, num, spacing);
 		ypos += BLHEIGHT;
 	}
@@ -304,13 +302,7 @@ static void freeblockstack(Block ***bstack, int lines, int num) {
 
 int main(int argc, char **argv) {
 
-	time_t t;
-	srand((unsigned) time(&t));
-
-	SDL_Window *win = NULL;
-	SDL_Renderer *rend = NULL;
-
-	SDL_Event *event = calloc(1, sizeof(SDL_Event));
+	srandom(time(NULL));
 
 	int blnum = WINW / BLWIDTH, rc = 0, score = 0;
 
@@ -318,11 +310,13 @@ int main(int argc, char **argv) {
 	Object *ball = mkobj(BSTPOSX, BSTPOSY, BSZ, BSZ);
 	Block ***bstack = mkblockstack(0, 0, blnum, BLINES, 0);
 
-    win = SDL_CreateWindow(argv[0],
+	SDL_Event *event = calloc(1, sizeof(SDL_Event));
+
+    SDL_Window *win = SDL_CreateWindow(argv[0],
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINW, WINH, 0);
 
-	rend = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+	SDL_Renderer *rend = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 	SDL_ShowCursor(SDL_DISABLE);
 
 	ball->mvmt->td = 1;
@@ -332,8 +326,6 @@ int main(int argc, char **argv) {
 	errno = 0;
 
 	while(!readevent(event, paddle->mvmt)) {
-        SDL_Delay(1000/60); // 60 fps
-
 		mvpaddle(paddle);
 		rc = mvball(paddle, ball, bstack, BLINES, blnum);
 
@@ -348,5 +340,7 @@ cleanup:
 	freeblockstack(bstack, BLINES, blnum);
 	freeobj(paddle);
 	freeobj(ball);
-	return die("", 0);
+	SDL_DestroyWindow(win);
+	SDL_DestroyRenderer(rend);
+	return die("", score);
 }
