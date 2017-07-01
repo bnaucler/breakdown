@@ -52,7 +52,7 @@ static void setbkg(SDL_Renderer *rend, int r, int g, int b) {
 }
 
 // Process incoming events
-static int readevent(SDL_Event *event, Movement *mvmt) {
+static int readevent(SDL_Event *event, Object *paddle) {
 
 	while (SDL_PollEvent(event)) {
 		switch (event->type) {
@@ -67,12 +67,12 @@ static int readevent(SDL_Event *event, Movement *mvmt) {
 
 				case SDL_SCANCODE_A:
 				case SDL_SCANCODE_LEFT:
-					mvmt->tl = 1;
+					paddle->mvmt->tl = 1;
 					break;
 
 				case SDL_SCANCODE_D:
 				case SDL_SCANCODE_RIGHT:
-					mvmt->tr = 1;
+					paddle->mvmt->tr = 1;
 					break;
 
 				default:
@@ -80,17 +80,21 @@ static int readevent(SDL_Event *event, Movement *mvmt) {
 			}
 			break;
 
+		case SDL_MOUSEMOTION:
+			SDL_GetMouseState(&paddle->rect->x, NULL);
+			break;
+
 		case SDL_KEYUP:
 			switch (event->key.keysym.scancode) {
 
 				case SDL_SCANCODE_A:
 				case SDL_SCANCODE_LEFT:
-					mvmt->tl = 0;
+					paddle->mvmt->tl = 0;
 					break;
 
 				case SDL_SCANCODE_D:
 				case SDL_SCANCODE_RIGHT:
-					mvmt->tr = 0;
+					paddle->mvmt->tr = 0;
 					break;
 
 				default:
@@ -256,12 +260,10 @@ static void freeobj(Object *obj) {
 	free(obj);
 }
 
-static Block **mkblockline(int ypos, int num, int spacing) {
+static Block **mkblockline(int ypos, int xpos, int num, int spacing) {
 
 	Block **barr = calloc(num, sizeof(Block*));
 	unsigned int a = 0;
-
-	int xpos = 0;
 
 	for(a = 0; a < num; a++) {
 		barr[a] = mkblock(xpos, ypos, BLWIDTH, BLHEIGHT, 0);
@@ -277,7 +279,7 @@ static Block ***mkblockstack(int ypos, int xpos, int num, int lines, int spacing
 	unsigned int a = 0;
 
 	for(a = 0; a < lines; a++) {
-		bstack[a] = mkblockline(ypos, num, spacing);
+		bstack[a] = mkblockline(ypos, xpos, num, spacing);
 		ypos += BLHEIGHT;
 	}
 
@@ -312,11 +314,12 @@ int main(int argc, char **argv) {
 
 	SDL_Event *event = calloc(1, sizeof(SDL_Event));
 
-    SDL_Window *win = SDL_CreateWindow(argv[0],
+	SDL_Window *win = SDL_CreateWindow(argv[0],
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINW, WINH, 0);
 
 	SDL_Renderer *rend = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	SDL_SetRelativeMouseMode(SDL_TRUE);
 	SDL_ShowCursor(SDL_DISABLE);
 
 	ball->mvmt->td = 1;
@@ -325,7 +328,7 @@ int main(int argc, char **argv) {
 	if(!win || !rend) die(SDL_GetError(), 1);
 	errno = 0;
 
-	while(!readevent(event, paddle->mvmt)) {
+	while(!readevent(event, paddle)) {
 		mvpaddle(paddle);
 		rc = mvball(paddle, ball, bstack, BLINES, blnum);
 
