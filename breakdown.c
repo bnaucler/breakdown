@@ -11,10 +11,17 @@
 #include <errno.h>
 #include <time.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 
 // Windoow
 #define WINW 640
 #define WINH 480
+
+// Scorecard
+#define FONTFILE "arial.ttf"
+#define SCXPOS 10
+#define SCYPOS (WINH - 30)
 
 // Paddle
 #define PSTPOSX 320
@@ -44,13 +51,6 @@ static int die(const char *err, int ret) {
 	exit(ret);
 }
 
-// Set window color to RGB
-static void setbkg(SDL_Renderer *rend, int r, int g, int b) {
-
-    SDL_SetRenderDrawColor(rend, r, g, b, 255);
-    SDL_RenderFillRect(rend, NULL);
-}
-
 // Process incoming events
 static int readevent(SDL_Event *event, Object *paddle) {
 
@@ -63,6 +63,7 @@ static int readevent(SDL_Event *event, Object *paddle) {
 		case SDL_KEYDOWN:
 			switch (event->key.keysym.scancode) {
 				case SDL_SCANCODE_Q:
+				case SDL_SCANCODE_ESCAPE:
 					return 1;
 
 				case SDL_SCANCODE_A:
@@ -159,7 +160,7 @@ static int mvball(Object *paddle, Object *ball, Block ***bstack, int lines, int 
 	if(ball->rect->y <= 0) swap(&ball->mvmt->tu, &ball->mvmt->td);
 	if(ball->rect->x + BSZ >= WINW) swap(&ball->mvmt->tr, &ball->mvmt->tl);
 
-	chstackcollision(ball, bstack, lines, num);
+	ret = chstackcollision(ball, bstack, lines, num);
 
 	if(ball->rect->y + BSZ >= paddle->rect->y) {
 		if(ball->rect->x >= paddle->rect->x && ball->rect->x <= paddle->rect->x + PWIDTH)
@@ -173,6 +174,12 @@ static int mvball(Object *paddle, Object *ball, Block ***bstack, int lines, int 
 	if(ball->mvmt->td) ball->rect->y += BSPEED;
 
 	return ret;
+}
+
+static void setbkg(SDL_Renderer *rend, int r, int g, int b) {
+
+    SDL_SetRenderDrawColor(rend, r, g, b, 255);
+    SDL_RenderFillRect(rend, NULL);
 }
 
 static void drawbline(SDL_Renderer *rend, Block **bline, int num) {
@@ -194,7 +201,8 @@ static void drawstack(SDL_Renderer *rend, Block ***bstack, int lines, int num) {
 	for(a = 0; a < lines; a++) drawbline(rend, bstack[a], num);
 }
 
-static void draw(SDL_Renderer *rend, Object *paddle, Object *ball, Block ***bstack, int lines, int num) {
+static void draw(SDL_Window *win, SDL_Renderer *rend, Object *paddle, Object *ball,
+	Block ***bstack, Scorecard *sc, int lines, int num) {
 
 	// Background
 	SDL_RenderClear(rend);
@@ -211,8 +219,78 @@ static void draw(SDL_Renderer *rend, Object *paddle, Object *ball, Block ***bsta
 	// Block stack
 	drawstack(rend, bstack, lines, num);
 
+	// Scorecard
+	SDL_RenderCopyEx(rend, sc->texture, sc->clip, sc->rndspace, 0, NULL,
+		SDL_FLIP_NONE);
+
 	// Present
 	SDL_RenderPresent(rend);
+}
+
+static void freeobj(Object *obj) {
+
+	free(obj->rect);
+	free(obj->mvmt);
+	free(obj);
+}
+
+static void freeblock(Block *block) {
+
+	free(block->rect);
+	free(block);
+}
+
+static void freeblockline(Block **bline, int num) {
+
+	unsigned int a  = 0;
+
+	for(a = 0; a < num; a++) freeblock(bline[a]);
+	free(bline);
+}
+
+static void freeblockstack(Block ***bstack, int lines, int num) {
+
+	unsigned int a = 0;
+
+	for(a = 0; a < lines; a++) freeblockline(bstack[a], num);
+	free(bstack);
+}
+
+static void freescorecard(Scorecard *sc) {
+
+	TTF_CloseFont(sc->font);
+	SDL_FreeSurface(sc->text);
+	free(sc->clip);
+	free(sc->rndspace);
+	free(sc);
+}
+
+static Scorecard *mkscorecard(SDL_Renderer *rend, const char *fontfile,
+	const char *text, const int x, const int y) {
+
+	Scorecard *sc = calloc(1, sizeof(Scorecard));
+	sc->clip = calloc(1, sizeof(SDL_Rect));
+	sc->rndspace = calloc(1, sizeof(SDL_Rect));
+
+	sc->rndspace->x = x;
+	sc->rndspace->y = y;
+
+	sc->col.r = 0;
+	sc->col.g = 0;
+	sc->col.b = 0;
+
+	sc->font = TTF_OpenFont(fontfile, 20);
+	sc->text = TTF_RenderText_Solid(sc->font, text, sc->col);
+	sc->texture = SDL_CreateTextureFromSurface(rend, sc->text);
+
+	sc->clip->w = sc->rndspace->w = sc->text->w;
+	sc->clip->h = sc->rndspace->h = sc->text->h;
+
+	if(!sc->font || !sc->text || !sc->texture) {
+		freescorecard(sc);
+		return NULL;
+	}
+	return sc;
 }
 
 static Object *mkobj(int x, int y, int w, int h) {
@@ -247,30 +325,17 @@ static Block *mkblock(int x, int y, int w, int h, int o) {
 	return block;
 }
 
-static void freeblock(Block *block) {
-
-	free(block->rect);
-	free(block);
-}
-
-static void freeobj(Object *obj) {
-
-	free(obj->rect);
-	free(obj->mvmt);
-	free(obj);
-}
-
 static Block **mkblockline(int ypos, int xpos, int num, int spacing) {
 
-	Block **barr = calloc(num, sizeof(Block*));
+	Block **bline = calloc(num, sizeof(Block*));
 	unsigned int a = 0;
 
 	for(a = 0; a < num; a++) {
-		barr[a] = mkblock(xpos, ypos, BLWIDTH, BLHEIGHT, 0);
+		bline[a] = mkblock(xpos, ypos, BLWIDTH, BLHEIGHT, 0);
 		xpos += (BLWIDTH + spacing);
 	}
 
-	return barr;
+	return bline;
 }
 
 static Block ***mkblockstack(int ypos, int xpos, int num, int lines, int spacing) {
@@ -286,31 +351,27 @@ static Block ***mkblockstack(int ypos, int xpos, int num, int lines, int spacing
 	return bstack;
 }
 
-static void freeblockline(Block **bline, int num) {
+static void updatescore(SDL_Renderer *rend, Scorecard *sc, int change) {
 
-	unsigned int a  = 0;
+	char tscore[10];
 
-	for(a = 0; a < num; a++) freeblock(bline[a]);
-	free(bline);
-}
+	sc->score += change;
+	snprintf(tscore, 10, "%d", sc->score);
 
-static void freeblockstack(Block ***bstack, int lines, int num) {
+	sc->text = TTF_RenderText_Solid(sc->font, tscore, sc->col);
+	sc->texture = SDL_CreateTextureFromSurface(rend, sc->text);
 
-	unsigned int a = 0;
-
-	for(a = 0; a < lines; a++) freeblockline(bstack[a], num);
-	free(bstack);
+	sc->clip->w = sc->rndspace->w = sc->text->w;
+	sc->clip->h = sc->rndspace->h = sc->text->h;
 }
 
 int main(int argc, char **argv) {
 
 	srandom(time(NULL));
 
-	int blnum = WINW / BLWIDTH, rc = 0, score = 0;
+	int blnum = WINW / BLWIDTH, rc = 0;
 
-	Object *paddle = mkobj(PSTPOSX, PSTPOSY, PWIDTH, PHEIGHT);
-	Object *ball = mkobj(BSTPOSX, BSTPOSY, BSZ, BSZ);
-	Block ***bstack = mkblockstack(0, 0, blnum, BLINES, 0);
+	SDL_Init(SDL_INIT_VIDEO);
 
 	SDL_Event *event = calloc(1, sizeof(SDL_Event));
 
@@ -318,32 +379,42 @@ int main(int argc, char **argv) {
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINW, WINH, 0);
 
-	SDL_Renderer *rend = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	SDL_Renderer *rend = SDL_CreateRenderer(win, -1,
+		SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 	SDL_ShowCursor(SDL_DISABLE);
 
-	ball->mvmt->td = 1;
-	ball->mvmt->tl = 1;
+	TTF_Init();
 
 	if(!win || !rend) die(SDL_GetError(), 1);
 	errno = 0;
+
+	Object *paddle = mkobj(PSTPOSX, PSTPOSY, PWIDTH, PHEIGHT);
+	Object *ball = mkobj(BSTPOSX, BSTPOSY, BSZ, BSZ);
+	Block ***bstack = mkblockstack(0, 0, blnum, BLINES, 0);
+	Scorecard *sc = mkscorecard(rend, FONTFILE, "0", SCXPOS, SCYPOS);
+
+	if(!paddle || !ball || !bstack || !sc) die("Failed to create objects", 1);
+
+	ball->mvmt->td = 1;
+	ball->mvmt->tl = 1;
 
 	while(!readevent(event, paddle)) {
 		mvpaddle(paddle);
 		rc = mvball(paddle, ball, bstack, BLINES, blnum);
 
-		if(rc == 1) score += 1;
-		else if(rc == 2) goto cleanup;
+		if(rc == 1) updatescore(rend, sc, 1);
+		else if(rc == 2) break;
 
-		draw(rend, paddle, ball, bstack, BLINES, blnum);
+		draw(win, rend, paddle, ball, bstack, sc, BLINES, blnum);
 		rc = 0;
 	}
 
-cleanup:
+	// Cleanup
 	freeblockstack(bstack, BLINES, blnum);
 	freeobj(paddle);
 	freeobj(ball);
 	SDL_DestroyWindow(win);
 	SDL_DestroyRenderer(rend);
-	return die("", score);
+	die("", 0);
 }

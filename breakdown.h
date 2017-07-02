@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_timer.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 
 typedef struct Movement {
 	int move;
@@ -26,5 +26,14 @@ typedef struct Block {
 	int opacity;
 	int active;
 } Block;
+
+typedef struct Scorecard {
+	int score;
+	TTF_Font *font;
+	SDL_Surface *text;
+	SDL_Texture *texture;
+	SDL_Rect *clip, *rndspace;
+	SDL_Color col;
+} Scorecard;
 
 #endif
